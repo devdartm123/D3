@@ -67,3 +67,293 @@ local Toggle = Tab:CreateToggle({
       infiniteJumpEnabled = Value
    end,
 })
+-- Place this in the main body of your script (outside any button/toggle-specific code)
+local autoStealEnabled = false
+local player = game.Players.LocalPlayer
+
+-- Auto-steal and drag to base logic (assumes selectedBrainrot from your existing dropdown)
+spawn(function()
+   while true do
+      wait(0.5)  -- Adjust delay to avoid lag or detection
+      if autoStealEnabled and selectedBrainrot then
+         local character = player.Character
+         if character then
+            local hrp = character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+               -- Find tycoons/plots (adjust path based on game; inspect workspace)
+               local tycoons = workspace:FindFirstChild("Tycoons") or workspace:FindFirstChild("Plots") or workspace
+               local yourBase = nil
+               for _, t in pairs(tycoons:GetChildren()) do
+                  local owner = t:FindFirstChild("Owner")
+                  if owner and (owner.Value == player.Name or owner.Value == player) then
+                     yourBase = t
+                     break
+                  end
+               end
+               if yourBase then
+                  -- Define base position (adjust to a specific part in your base, e.g., spawn or drop area)
+                  local basePosition = yourBase:FindFirstChild("Spawn") and yourBase.Spawn.CFrame or yourBase.CFrame * CFrame.new(0, 5, 0)
+                  for _, t in pairs(tycoons:GetChildren()) do
+                     if t ~= yourBase then
+                        for _, br in pairs(t:GetDescendants()) do
+                           if br:IsA("Model") and br.Name == selectedBrainrot then
+                              -- Move player to Brainrot fast to "steal" (teleport for speed)
+                              hrp.CFrame = br.PrimaryPart and br.PrimaryPart.CFrame or br.CFrame
+                              -- If game uses touch interest for stealing, use firetouchinterest (if your executor supports it)
+                              local touchPart = br:FindFirstChildWhichIsA("BasePart")
+                              if touchPart and firetouchinterest then
+                                 firetouchinterest(hrp, touchPart, 0)
+                                 wait(0.01)
+                                 firetouchinterest(hrp, touchPart, 1)
+                              end
+                              wait(0.2)  -- Wait for steal/attach to trigger
+                              -- Drag back to base fast (teleport for speed)
+                              hrp.CFrame = basePosition
+                              -- Optional: Notify success
+                              -- Rayfield:Notify({Title = "Steal Success", Content = "Stole " .. selectedBrainrot .. " and dragged to base!", Duration = 3})
+                              return  -- Exit loop after one steal to avoid spamming
+                           end
+                        end
+                     end
+                  end
+               end
+            end
+         end
+      end
+   end
+end)
+
+-- Add this toggle to your existing main tab (replace "MainTab" with your actual tab variable)
+local Toggle = MainTab:CreateToggle({
+   Name = "Auto Steal & Drag to Base",
+   CurrentValue = false,
+   Flag = "AutoStealToggle",
+   Callback = function(Value)
+      autoStealEnabled = Value
+   end,
+})
+
+-- Add this near the top of your script for services and variables
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local hrp = character:WaitForChild("HumanoidRootPart")
+
+local autoHitEnabled = false
+local antiHitEnabled = false
+local espEnabled = false
+local autoLockEnabled = false
+local laserEspEnabled = false
+
+-- Auto Hit logic: Automatically swings slap or bat if equipped
+spawn(function()
+   while true do
+      wait(0.1)
+      if autoHitEnabled and character then
+         local tool = character:FindFirstChildWhichIsA("Tool")
+         if tool and (tool.Name:find("Slap") or tool.Name:find("Bat")) then
+            tool:Activate()
+         end
+      end
+   end
+end)
+
+-- Anti Hit logic: Prevent hits by setting high health or forcefield (adjust based on game)
+spawn(function()
+   while true do
+      wait(0.1)
+      if antiHitEnabled and humanoid then
+         humanoid.Health = humanoid.MaxHealth  -- Reset health to max to counter damage
+         -- If game uses forcefields, create one:
+         -- local ff = Instance.new("ForceField", character)
+         -- ff.Visible = false
+      end
+   end
+end)
+
+-- ESP logic: Highlights all players
+local function addESP(target)
+   local highlight = Instance.new("Highlight")
+   highlight.Parent = target
+   highlight.FillColor = Color3.fromRGB(255, 0, 0)
+   highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+   highlight.FillTransparency = 0.5
+   highlight.OutlineTransparency = 0
+   return highlight
+end
+
+local esps = {}
+spawn(function()
+   while true do
+      wait(1)
+      if espEnabled then
+         for _, p in pairs(Players:GetPlayers()) do
+            if p ~= player and p.Character then
+               if not esps[p] then
+                  esps[p] = addESP(p.Character)
+               end
+            end
+         end
+      else
+         for _, hl in pairs(esps) do
+            hl:Destroy()
+         end
+         esps = {}
+      end
+   end
+end)
+
+-- Base Laser Unlock Time ESP: Highlights timer on other bases' lasers/lock
+local laserEsps = {}
+spawn(function()
+   while true do
+      wait(1)
+      if laserEspEnabled then
+         local tycoons = workspace:FindFirstChild("Tycoons") or workspace:FindFirstChild("Bases")  -- Adjust path
+         if tycoons then
+            for _, base in pairs(tycoons:GetChildren()) do
+               local owner = base:FindFirstChild("Owner")
+               if owner and owner.Value ~= player then
+                  local lockTimer = base:FindFirstChild("LockTimer")  -- Assume NumberValue for timer
+                  if lockTimer then
+                     if not laserEsps[base] then
+                        local bb = Instance.new("BillboardGui", base)
+                        bb.Name = "LaserESP"
+                        bb.AlwaysOnTop = true
+                        bb.Size = UDim2.new(0, 100, 0, 50)
+                        bb.StudsOffset = Vector3.new(0, 5, 0)
+                        local text = Instance.new("TextLabel", bb)
+                        text.BackgroundTransparency = 1
+                        text.Size = UDim2.new(1, 0, 1, 0)
+                        text.TextColor3 = Color3.fromRGB(255, 255, 0)
+                        text.Text = "Time left: " .. lockTimer.Value
+                        laserEsps[base] = bb
+                     else
+                        laserEsps[base].TextLabel.Text = "Time left: " .. lockTimer.Value
+                     end
+                  end
+               end
+            end
+         end
+      else
+         for _, bb in pairs(laserEsps) do
+            bb:Destroy()
+         end
+         laserEsps = {}
+      end
+   end
+end)
+
+-- Auto Lock logic: Automatically step on yellow button to lock base
+spawn(function()
+   while true do
+      wait(5)  -- Check every 5 seconds
+      if autoLockEnabled then
+         local tycoons = workspace:FindFirstChild("Tycoons") or workspace:FindFirstChild("Bases")
+         if tycoons then
+            local yourBase = nil
+            for _, base in pairs(tycoons:GetChildren()) do
+               local owner = base:FindFirstChild("Owner")
+               if owner and (owner.Value == player or owner.Value == player.Name) then
+                  yourBase = base
+                  break
+               end
+            end
+            if yourBase then
+               local lockButton = yourBase:FindFirstChild("LockButton") or yourBase:FindFirstChild("YellowButton")  -- Adjust name
+               if lockButton and lockButton:IsA("BasePart") then
+                  hrp.CFrame = lockButton.CFrame * CFrame.new(0, 3, 0)  -- TP above button to step on it
+                  wait(0.5)
+                  -- If needed, firetouchinterest(hrp, lockButton, 0)
+                  -- wait(0.01)
+                  -- firetouchinterest(hrp, lockButton, 1)
+               end
+            end
+         end
+      end
+   end
+end)
+
+-- Create new tab "Others"
+local OthersTab = Window:CreateTab("Others")
+
+-- TP to Shop button
+local ShopTPButton = OthersTab:CreateButton({
+   Name = "TP to Shop",
+   Callback = function()
+      local shop = workspace:FindFirstChild("Shop") or workspace:FindFirstChild("CoinsShop")  -- Adjust path
+      if shop then
+         hrp.CFrame = shop.CFrame * CFrame.new(0, 5, 0)  -- TP to shop
+      else
+         -- Hardcode CFrame if known, e.g., hrp.CFrame = CFrame.new(Vector3.new(0, 10, 0))  -- Replace with actual coords
+      end
+   end,
+})
+
+-- TP to Base button
+local BaseTPButton = OthersTab:CreateButton({
+   Name = "TP to Base",
+   Callback = function()
+      local tycoons = workspace:FindFirstChild("Tycoons") or workspace:FindFirstChild("Bases")
+      if tycoons then
+         for _, base in pairs(tycoons:GetChildren()) do
+            local owner = base:FindFirstChild("Owner")
+            if owner and (owner.Value == player or owner.Value == player.Name) then
+               local spawnPoint = base:FindFirstChild("Spawn") or base  -- Adjust
+               hrp.CFrame = spawnPoint.CFrame * CFrame.new(0, 5, 0)
+               break
+            end
+         end
+      end
+   end,
+})
+
+-- Add toggles to your existing MainTab (or OthersTab if preferred)
+local AutoHitToggle = MainTab:CreateToggle({
+   Name = "Auto Hit",
+   CurrentValue = false,
+   Flag = "AutoHitToggle",
+   Callback = function(Value)
+      autoHitEnabled = Value
+   end,
+})
+
+local AntiHitToggle = MainTab:CreateToggle({
+   Name = "Anti Hit",
+   CurrentValue = false,
+   Flag = "AntiHitToggle",
+   Callback = function(Value)
+      antiHitEnabled = Value
+   end,
+})
+
+local ESPToggle = MainTab:CreateToggle({
+   Name = "ESP",
+   CurrentValue = false,
+   Flag = "ESPToggle",
+   Callback = function(Value)
+      espEnabled = Value
+   end,
+})
+
+local LaserESPToggle = MainTab:CreateToggle({
+   Name = "Base Laser Unlock Time ESP",
+   CurrentValue = false,
+   Flag = "LaserESPToggle",
+   Callback = function(Value)
+      laserEspEnabled = Value
+   end,
+})
+
+local AutoLockToggle = MainTab:CreateToggle({
+   Name = "Auto Lock",
+   CurrentValue = false,
+   Flag = "AutoLockToggle",
+   Callback = function(Value)
+      autoLockEnabled = Value
+   end,
+})
