@@ -46,16 +46,24 @@ Rayfield:Notify({
    Image = 4483362458,
 })
 
-local Button = MainTab:CreateButton({
-   Name = "Infinite Jump",
-   Callback = function()
 local UserInputService = game:GetService("UserInputService")
 local player = game.Players.LocalPlayer
+local infiniteJumpEnabled = false
 
+-- Infinite jump logic
 UserInputService.JumpRequest:Connect(function()
-	if player.Character and player.Character:FindFirstChild("Humanoid") then
-		player.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-	end
+   if infiniteJumpEnabled and player.Character and player.Character:FindFirstChild("Humanoid") then
+      player.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+   end
 end)
 
+-- Rayfield button
+local Tab = Window:CreateTab("Main") -- Adjust "Window" to your existing Rayfield window variable
+local Toggle = Tab:CreateToggle({
+   Name = "Infinite Jump",
+   CurrentValue = false,
+   Flag = "InfiniteJumpToggle",
+   Callback = function(Value)
+      infiniteJumpEnabled = Value
+   end,
 })
