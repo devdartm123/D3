@@ -58,7 +58,7 @@ UserInputService.JumpRequest:Connect(function()
 end)
 
 -- Rayfield button
-local Tab = Window:CreateTab("Main") -- Adjust "Window" to your existing Rayfield window variable
+local MainTab = Window:CreateTab("Main") -- Adjust "Window" to your existing Rayfield window variable
 local Toggle = Tab:CreateToggle({
    Name = "Infinite Jump",
    CurrentValue = false,
