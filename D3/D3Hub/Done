@@ -45,3 +45,17 @@ Rayfield:Notify({
    Duration = 6.5,
    Image = 4483362458,
 })
+
+local Button = MainTab:CreateButton({
+   Name = "Infinite Jump",
+   Callback = function()
+local UserInputService = game:GetService("UserInputService")
+local player = game.Players.LocalPlayer
+
+UserInputService.JumpRequest:Connect(function()
+	if player.Character and player.Character:FindFirstChild("Humanoid") then
+		player.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+	end
+end)
+
+})
