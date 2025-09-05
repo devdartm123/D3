@@ -1,357 +1,169 @@
+-- Roblox LocalScript using Rayfield UI library
+-- Creates a UI with toggles to record and replay player movements (CFrames) and inputs (mouse clicks, key presses).
+-- Includes proximity detection to log interactions with ProximityPrompts (e.g., chests).
+-- Playback replays movements and triggers ProximityPrompts when near recorded positions.
+-- Note: This is a basic movement and input recorder/replayer. It records CFrames, mouse clicks, key presses, and ProximityPrompt interactions.
+
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local UserInputService = game:GetService("UserInputService")
 
 local Window = Rayfield:CreateWindow({
-   Name = "D3Hub",
-   Icon = 0, -- Icon in Topbar. Can use Lucide Icons (string) or Roblox Image (number). 0 to use no icon (default).
-   LoadingTitle = "D3",
-   LoadingSubtitle = "By D3",
-   ShowText = "D3", -- for mobile users to unhide rayfield, change if you'd like
-   Theme = "Amethyst", -- Check https://docs.sirius.menu/rayfield/configuration/themes
-
-   ToggleUIKeybind = "K", -- The keybind to toggle the UI visibility (string like "K" or Enum.KeyCode)
-
-   DisableRayfieldPrompts = false,
-   DisableBuildWarnings = false, -- Prevents Rayfield from warning when the script has a version mismatch with the interface
-
-   ConfigurationSaving = {
-      Enabled = true,
-      FolderName = nil, -- Create a custom folder for your hub/game
-      FileName = "D3 Hub"
-   },
-
-   Discord = {
-      Enabled = true, -- Prompt the user to join your Discord server if their executor supports it
-      Invite = "https://discord.gg/uSd8t6qRX8", -- The Discord invite code, do not include discord.gg/. E.g. discord.gg/ ABCD would be ABCD
-      RememberJoins = true -- Set this to false to make them join the discord every time they load it up
-   },
-
-   KeySystem = false, -- Set this to true to use our key system
-   KeySettings = {
-      Title = "Untitled",
-      Subtitle = "Key System",
-      Note = "No method of obtaining the key is provided", -- Use this to tell the user how to get a key
-      FileName = "Key", -- It is recommended to use something unique as other scripts using Rayfield may overwrite your key file
-      SaveKey = true, -- The user's key will be saved, but if you change the key, they will be unable to use your script
-      GrabKeyFromSite = false, -- If this is true, set Key below to the RAW site you would like Rayfield to get the key from
-      Key = {"Hello"} -- List of keys that will be accepted by the system, can be RAW file links (pastebin, github etc) or simple strings ("hello","key22")
-   }
+    Name = "Action Recorder",
+    LoadingTitle = "Loading...",
+    LoadingSubtitle = "Movement & Input Recorder",
+    ConfigurationSaving = {
+        Enabled = false,
+    }
 })
 
-local Tab = Window:CreateTab("Main", 4483362458) -- Title, Image
+local Tab = Window:CreateTab("🎯Main🎯", nil)
 
-Rayfield:Notify({
-   Title = "Notifaction",
-   Content = "Thanks for using my script, this is my first script in the making so please expect bugs. thenk you!",
-   Duration = 6.5,
-   Image = 4483362458,
-})
+local recorded = {} -- Table to store {cframe, delta, input, prompt}
+local recording = false
+local playing = false
+local recordConnection = nil
+local inputConnection = nil
+local playThread = nil
 
-local UserInputService = game:GetService("UserInputService")
-local player = game.Players.LocalPlayer
-local infiniteJumpEnabled = false
-
--- Infinite jump logic
-UserInputService.JumpRequest:Connect(function()
-   if infiniteJumpEnabled and player.Character and player.Character:FindFirstChild("Humanoid") then
-      player.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-   end
-end)
-
--- Rayfield button
-local MainTab = Window:CreateTab("Main") -- Adjust "Window" to your existing Rayfield window variable
-local Toggle = Tab:CreateToggle({
-   Name = "Infinite Jump",
-   CurrentValue = false,
-   Flag = "InfiniteJumpToggle",
-   Callback = function(Value)
-      infiniteJumpEnabled = Value
-   end,
-})
-
--- Services and variables
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local player = Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local humanoid = character:WaitForChild("Humanoid")
-local hrp = character:WaitForChild("HumanoidRootPart")
-
-local autoHitEnabled = false
-local antiHitEnabled = false
-local espEnabled = false
-local autoLockEnabled = false
-local laserEspEnabled = false
-
--- Randomized delay function
-local function randomDelay(min, max)
-   wait(min + math.random() * (max - min))
+-- Function to get character's root part
+local function getRoot()
+    local player = game.Players.LocalPlayer
+    local character = player.Character
+    if character and character:FindFirstChild("HumanoidRootPart") then
+        return character.HumanoidRootPart
+    end
+    return nil
 end
 
--- Auto Hit: Automatically swings slap or bat
-spawn(function()
-   while true do
-      randomDelay(0.3, 0.6) -- Human-like timing
-      if autoHitEnabled and character then
-         local tool = character:FindFirstChildWhichIsA("Tool")
-         if tool and (tool.Name:lower():find("slap") or tool.Name:lower():find("bat")) then
-            tool:Activate()
-            randomDelay(0.4, 0.8) -- Delay between swings
-         end
-      end
-   end
-end)
-
--- Anti Hit: Prevent damage by temporarily boosting max health
-spawn(function()
-   while true do
-      randomDelay(0.7, 1.2) -- Infrequent checks
-      if antiHitEnabled and humanoid then
-         local originalMaxHealth = humanoid.MaxHealth
-         humanoid.MaxHealth = math.min(originalMaxHealth + 1000, 10000) -- Subtle boost
-         if humanoid.Health < originalMaxHealth then
-            humanoid.Health = originalMaxHealth
-         end
-         randomDelay(0.05, 0.1)
-         humanoid.MaxHealth = originalMaxHealth -- Immediate reset
-      end
-   end
-end)
-
--- ESP: Highlights other players
-local function addESP(target)
-   local highlight = Instance.new("Highlight")
-   highlight.Parent = target
-   highlight.FillColor = Color3.fromRGB(255, 165, 0) -- Orange, visible on all themes
-   highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-   highlight.FillTransparency = 0.7 -- Lightweight
-   highlight.OutlineTransparency = 0
-   return highlight
+-- Function to find nearby ProximityPrompt (within 5 studs)
+local function findNearbyPrompt()
+    local root = getRoot()
+    if not root then return nil end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("ProximityPrompt") then
+            local parent = obj.Parent
+            if parent and parent:IsA("BasePart") or parent:IsA("Model") then
+                local promptPos = parent:IsA("BasePart") and parent.Position or parent:GetPrimaryPartCFrame().Position
+                if (promptPos - root.Position).Magnitude <= 5 then
+                    return obj
+                end
+            end
+        end
+    end
+    return nil
 end
 
-local esps = {}
-spawn(function()
-   while true do
-      randomDelay(1.5, 2.5)
-      if espEnabled then
-         for _, p in pairs(Players:GetPlayers()) do
-            if p ~= player and p.Character then
-               if not esps[p] then
-                  esps[p] = addESP(p.Character)
-               end
+-- Toggle for Record
+local RecordToggle = Tab:CreateToggle({
+    Name = "Record Actions",
+    CurrentValue = false,
+    Callback = function(Value)
+        local root = getRoot()
+        if not root then
+            Rayfield:Notify({Title = "Error", Content = "Character not loaded!", Duration = 5})
+            RecordToggle:Set(false)
+            return
+        end
+
+        if Value then
+            -- Start recording
+            recorded = {}
+            recording = true
+            local lastTime = tick()
+            recordConnection = game:GetService("RunService").Heartbeat:Connect(function()
+                if recording then
+                    local now = tick()
+                    local delta = now - lastTime
+                    lastTime = now
+                    local prompt = findNearbyPrompt()
+                    table.insert(recorded, {
+                        cframe = root.CFrame,
+                        delta = delta,
+                        input = nil, -- Will be set by inputConnection if input occurs
+                        prompt = prompt and {name = prompt.Parent.Name, position = prompt.Parent:IsA("BasePart") and prompt.Parent.Position or prompt.Parent:GetPrimaryPartCFrame().Position}
+                    })
+                end
+            end)
+
+            -- Record mouse clicks and key presses
+            inputConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+                if recording and not gameProcessed then
+                    local inputType = input.UserInputType == Enum.UserInputType.MouseButton1 and "MouseClick" or input.KeyCode.Name
+                    if inputType ~= "Unknown" then
+                        recorded[#recorded].input = inputType
+                    end
+                end
+            end)
+
+            Rayfield:Notify({Title = "Recording", Content = "Started recording movements, inputs, and proximity prompts.", Duration = 5})
+        else
+            -- Stop recording
+            recording = false
+            if recordConnection then
+                recordConnection:Disconnect()
+                recordConnection = nil
             end
-         end
-      else
-         for _, hl in pairs(esps) do
-            hl:Destroy()
-         end
-         esps = {}
-      end
-   end
-end)
-
--- Base Laser Unlock Time ESP: Displays timer on other bases
-local laserEsps = {}
-spawn(function()
-   while true do
-      randomDelay(2, 4)
-      if laserEspEnabled then
-         local tycoons = workspace:FindFirstChild("Tycoons") or workspace:FindFirstChild("Bases")
-         if tycoons then
-            for _, base in pairs(tycoons:GetChildren()) do
-               local owner = base:FindFirstChild("Owner")
-               if owner and owner.Value ~= player and owner.Value ~= player.Name then
-                  local lockTimer = base:FindFirstChild("LockTimer")
-                  if lockTimer and (lockTimer:IsA("NumberValue") or lockTimer:IsA("IntValue")) then
-                     if not laserEsps[base] then
-                        local bb = Instance.new("BillboardGui", base)
-                        bb.Name = "LaserESP"
-                        bb.AlwaysOnTop = true
-                        bb.Size = UDim2.new(0, 80, 0, 40)
-                        bb.StudsOffset = Vector3.new(0, 6, 0)
-                        local text = Instance.new("TextLabel", bb)
-                        text.BackgroundTransparency = 1
-                        text.Size = UDim2.new(1, 0, 1, 0)
-                        text.TextColor3 = Color3.fromRGB(255, 255, 0)
-                        text.TextScaled = true
-                        laserEsps[base] = bb
-                     end
-                     laserEsps[base].TextLabel.Text = "Unlock in: " .. math.floor(lockTimer.Value) .. "s"
-                  end
-               end
+            if inputConnection then
+                inputConnection:Disconnect()
+                inputConnection = nil
             end
-         end
-      else
-         for _, bb in pairs(laserEsps) do
-            bb:Destroy()
-         end
-         laserEsps = {}
-      end
-   end
-end)
-
--- Auto Lock: Steps on yellow button
-spawn(function()
-   while true do
-      randomDelay(6, 8) -- Infrequent checks
-      if autoLockEnabled and character and humanoid then
-         local tycoons = workspace:FindFirstChild("Tycoons") or workspace:FindFirstChild("Bases")
-         if tycoons then
-            local yourBase = nil
-            for _, base in pairs(tycoons:GetChildren()) do
-               local owner = base:FindFirstChild("Owner")
-               if owner and (owner.Value == player or owner.Value == player.Name) then
-                  yourBase = base
-                  break
-               end
-            end
-            if yourBase then
-               local lockButton = yourBase:FindFirstChild("LockButton") or yourBase:FindFirstChild("YellowButton")
-               if lockButton and lockButton:IsA("BasePart") then
-                  humanoid:MoveTo(lockButton.Position)
-                  humanoid.MoveToFinished:Wait()
-                  randomDelay(0.3, 0.6)
-                  if firetouchinterest then
-                     firetouchinterest(hrp, lockButton, 0)
-                     randomDelay(0.02, 0.05)
-                     firetouchinterest(hrp, lockButton, 1)
-                  end
-               end
-            end
-         end
-      end
-   end
-end)
-
--- Create "Others" tab
-local OthersTab = Window:CreateTab("Others")
-
--- TP to Shop button
-local ShopTPButton = OthersTab:CreateButton({
-   Name = "TP to Shop",
-   Callback = function()
-      local shop = workspace:FindFirstChild("Shop") or workspace:FindFirstChild("CoinsShop")
-      if shop and humanoid then
-         humanoid:MoveTo(shop.Position + Vector3.new(0, 5, 0))
-      else
-         Rayfield:Notify({
-            Title = "Shop Not Found",
-            Content = "Update shop path or coordinates",
-            Duration = 3
-         })
-      end
-   end,
+            Rayfield:Notify({Title = "Recording", Content = "Stopped and saved " .. #recorded .. " actions.", Duration = 5})
+        end
+    end,
 })
 
--- TP to Base button
-local BaseTPButton = OthersTab:CreateButton({
-   Name = "TP to Base",
-   Callback = function()
-      local tycoons = workspace:FindFirstChild("Tycoons") or workspace:FindFirstChild("Bases")
-      if tycoons and humanoid then
-         for _, base in pairs(tycoons:GetChildren()) do
-            local owner = base:FindFirstChild("Owner")
-            if owner and (owner.Value == player or owner.Value == player.Name) then
-               local spawnPoint = base:FindFirstChild("Spawn") or base
-               humanoid:MoveTo(spawnPoint.Position + Vector3.new(0, 5, 0))
-               break
-            end
-         end
-      else
-         Rayfield:Notify({
-            Title = "Base Not Found",
-            Content = "Update tycoon path",
-            Duration = 3
-         })
-      end
-   end,
-})
+-- Toggle for Play
+local PlayToggle = Tab:CreateToggle({
+    Name = "Play Actions",
+    CurrentValue = false,
+    Callback = function(Value)
+        if #recorded == 0 then
+            Rayfield:Notify({Title = "Error", Content = "No actions recorded!", Duration = 5})
+            PlayToggle:Set(false)
+            return
+        end
 
--- Toggles in MainTab
-local AutoHitToggle = MainTab:CreateToggle({
-   Name = "Auto Hit",
-   CurrentValue = false,
-   Flag = "AutoHitToggle",
-   Callback = function(Value)
-      autoHitEnabled = Value
-   end,
-})
+        local root = getRoot()
+        if not root then
+            Rayfield:Notify({Title = "Error", Content = "Character not loaded!", Duration = 5})
+            PlayToggle:Set(false)
+            return
+        end
 
-local AntiHitToggle = MainTab:CreateToggle({
-   Name = "Anti Hit",
-   CurrentValue = false,
-   Flag = "AntiHitToggle",
-   Callback = function(Value)
-      antiHitEnabled = Value
-   end,
-})
-
-local ESPToggle = MainTab:CreateToggle({
-   Name = "ESP",
-   CurrentValue = false,
-   Flag = "ESPToggle",
-   Callback = function(Value)
-      espEnabled = Value
-   end,
-})
-
-local LaserESPToggle = MainTab:CreateToggle({
-   Name = "Base Laser Unlock Time ESP",
-   CurrentValue = false,
-   Flag = "LaserESPToggle",
-   Callback = function(Value)
-      laserEspEnabled = Value
-   end,
-})
-
-local AutoLockToggle = MainTab:CreateToggle({
-   Name = "Auto Lock",
-   CurrentValue = false,
-   Flag = "AutoLockToggle",
-   Callback = function(Value)
-      autoLockEnabled = Value
-   end,
-})
-
--- Create "Settings" tab
-local SettingsTab = Window:CreateTab("Settings")
-
--- Change UI Color button
-local ColorButton = SettingsTab:CreateButton({
-   Name = "Change UI Color",
-   Callback = function()
-      -- Cycle through preset colors (Rayfield's Theme may not support direct color changes)
-      local colors = {
-         {Name = "Default", Color = Color3.fromRGB(255, 255, 255)},
-         {Name = "Red", Color = Color3.fromRGB(255, 0, 0)},
-         {Name = "Blue", Color = Color3.fromRGB(0, 0, 255)},
-         {Name = "Green", Color = Color3.fromRGB(0, 255, 0)}
-      }
-      local currentColor = Rayfield.CurrentTheme or "Default"
-      local nextColorIndex = 1
-      for i, color in ipairs(colors) do
-         if color.Name == currentColor then
-            nextColorIndex = (i % #colors) + 1
-            break
-         end
-      end
-      -- Rayfield doesn't natively support color changes; notify user of selection
-      Rayfield:Notify({
-         Title = "UI Color",
-         Content = "Selected color: " .. colors[nextColorIndex].Name,
-         Duration = 3
-      })
-   end,
-})
-
--- Credit button
-local CreditButton = SettingsTab:CreateButton({
-   Name = "Script Creator",
-   Callback = function()
-      Rayfield:Notify({
-         Title = "Credit",
-         Content = "Script made by Dartm19",
-         Duration = 3
-      })
-   end,
+        if Value then
+            -- Start playing in a loop
+            playing = true
+            playThread = spawn(function()
+                while playing do
+                    for _, action in ipairs(recorded) do
+                        if not playing then break end
+                        root.CFrame = action.cframe
+                        if action.input then
+                            -- Simulate input (note: actual input simulation is limited in Roblox; notify instead)
+                            Rayfield:Notify({Title = "Playback Input", Content = "Simulated input: " .. action.input, Duration = 1})
+                        end
+                        if action.prompt then
+                            -- Check if a ProximityPrompt exists at the recorded position
+                            for _, obj in ipairs(workspace:GetDescendants()) do
+                                if obj:IsA("ProximityPrompt") and obj.Parent.Name == action.prompt.name then
+                                    local promptPos = obj.Parent:IsA("BasePart") and obj.Parent.Position or obj.Parent:GetPrimaryPartCFrame().Position
+                                    if (promptPos - action.prompt.position).Magnitude < 1 then
+                                        fireproximityprompt(obj)
+                                        Rayfield:Notify({Title = "Playback Prompt", Content = "Triggered prompt: " .. action.prompt.name, Duration = 1})
+                                        break
+                                    end
+                                end
+                            end
+                        end
+                        wait(action.delta)
+                    end
+                end
+            end)
+            Rayfield:Notify({Title = "Playback", Content = "Started playing actions in loop.", Duration = 5})
+        else
+            -- Stop playing
+            playing = false
+            Rayfield:Notify({Title = "Playback", Content = "Stopped playback.", Duration = 5})
+        end
+    end,
 })
